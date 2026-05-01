@@ -11,12 +11,12 @@
 
 *Deployment and Containerization*
 
-- 🎥 [Deploy Docker Container app to Azure App Service](https://www.youtube.com/watch?v=voieMVB3OzY): Practical YouTube
-  tutorial on deploying Docker container applications to Azure App Service [2022] (~32m)
-- 📄 [Deploy and run a containerized web app with Azure App Service](https://learn.microsoft.com/en-us/training/modules/deploy-run-container-app-service/):
-Microsoft Learn tutorial on deploying Docker container applications to Azure App Service
-- 📄 [Deploy a website to Azure with Azure App Service](https://learn.microsoft.com/en-us/training/paths/deploy-a-website-with-azure-app-service/):
-Step-by-step learning path to deploy websites using Azure App Service (~4h 3m)
+- 🎥 [Deploy Docker Container app to Azure App Service](https://www.youtube.com/watch?v=voieMVB3OzY): Practical YouTube tutorial on deploying Docker container applications to Azure App Service [2022] (~32m)
+- 🎥 [Explore Azure App Service deployment slots](https://www.youtube.com/watch?v=LxfCMQBn9MQ): Learn how Azure App Service deployment slots support safer application updates and releases [2026] (~25m)
+- 🎥 [Scale apps in Azure App Service](https://www.youtube.com/watch?v=sY8fW54cSFc): Learn scaling strategies and Azure App Service features for AZ-204 exam preparation [2026] (~29m)
+- 🎥 [Azure Traffic Manager Deep Dive](https://www.youtube.com/watch?v=PfZPuBt50ps): Explains Azure Traffic Manager profiles, routing methods, endpoint types, DNS resolution, and health probes [2023] (~57m)
+- 📄 [Quickstart: Run a Custom Container on App Service](https://learn.microsoft.com/en-us/azure/app-service/quickstart-custom-container): Microsoft Learn quickstart on deploying Docker container applications to Azure App Service
+- 📄 [Implement Azure App Service web apps](https://learn.microsoft.com/en-us/training/paths/create-azure-app-service-web-apps/): Learning path covering App Service configuration, autoscaling, and deployment slots (~4h, Intermediate, 4 modules)
 
 ### Additional Resources
 
