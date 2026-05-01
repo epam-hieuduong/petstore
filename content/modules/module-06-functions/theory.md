@@ -8,8 +8,6 @@
 
 *Functions*
 
-- 🎥 [Azure Functions for Developers](https://www.linkedin.com/learning/azure-functions-for-developers-24637001):
-  In-depth course on building serverless applications using Azure Functions [2024] (~2h 12m)
 - 📄 [Create serverless logic with Azure Functions](https://learn.microsoft.com/en-us/training/modules/create-serverless-logic-with-azure-functions/): Learn to develop scalable, serverless solutions with Azure Functions (~36m)
 - 📄 [Create a Java function from the command line](https://learn.microsoft.com/en-us/azure/azure-functions/create-first-function-cli-java?tabs=windows%2Cbash%2Cazure-cli%2Cbrowser):
 Tutorial on creating Java serverless Functions on Azure

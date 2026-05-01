@@ -8,8 +8,6 @@
 
 - 📄 [App Service overview](https://learn.microsoft.com/en-us/azure/app-service/overview): Understand the basics of Azure App Service and how it helps deploy web apps, APIs, and mobile backends
 - 📄 [Azure App Service plan overview](https://learn.microsoft.com/en-us/azure/app-service/overview-hosting-plans): Learn about different pricing tiers and hosting plans
-- 🎥 [Azure Administration: Implement and Manage Application Services](https://www.linkedin.com/learning/azure-administration-implement-and-manage-application-services-21716665):
-Comprehensive video course on Azure Application Services, covering implementation and management [2023] (~2h 59m)
 
 *Deployment and Containerization*
 

@@ -10,13 +10,6 @@
 
 - 📄 [Microsoft Entra authentication overview](https://learn.microsoft.com/en-us/entra/identity/authentication/overview-authentication):
 Overview of authentication services in Microsoft Entra.
-- 🎥 [Microsoft Entra ID Fundamentals](https://www.linkedin.com/learning/microsoft-entra-id-fundamentals): A video course
-  covering the foundational elements of Microsoft Entra ID [2024] (~2h 11m).
-- 🎥 [Microsoft Entra ID for Developers: A Beginner's Guide](https://www.linkedin.com/learning/microsoft-entra-id-for-developers-a-beginner-s-guide-24381006):
-An introductory video guide tailored for developers [2024] (~1h 48m).
-
-- 🎥 [Microsoft Entra ID for Developers: A Beginner's Guide](https://www.linkedin.com/learning/microsoft-entra-id-for-developers-a-beginner-s-guide-24381006):
-An introductory video guide tailored for developers [2024] (~1h 48m).
 
 *Microsoft Entra External ID*
 
@@ -35,9 +28,6 @@ Integrate Microsoft Entra ID for user sign-in in Spring web applications.
 Developer guide for using Microsoft Entra starter.
 
 ### Additional Resources
-
-- 🎥 [Microsoft Azure: Identity and Access Management](https://www.linkedin.com/learning/microsoft-azure-identity-and-access-management-23388392):
-Video series focusing on identity and access management within Azure, relevant to Microsoft Entra [2024] (~1h 51m).
 
 - 🎥 [Get started with Microsoft Entra external ID](https://www.youtube.com/watch?v=AgjAgcBOehU): Video guide for
   creating a new Microsoft Entra External ID tenant.
