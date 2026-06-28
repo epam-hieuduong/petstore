@@ -13,7 +13,9 @@ import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static com.chtrembl.petstoreapp.config.Constants.CATEGORY;
 import static com.chtrembl.petstoreapp.config.Constants.OPERATION;
@@ -43,10 +45,12 @@ public class ProductManagementService {
                 requestId, traceId, category);
 
         try {
-            this.sessionUser.getTelemetryClient().trackEvent(
-                    String.format("PetStoreApp user %s is requesting to retrieve products from the ProductService",
-                            this.sessionUser.getName()),
-                    this.sessionUser.getCustomEventProperties(), null);
+            Map<String, String> props = new HashMap<>(this.sessionUser.getCustomEventProperties());
+            props.put("username", this.sessionUser.getName());
+            props.put("sessionId", this.sessionUser.getSessionId());
+            props.put("category", category);
+
+            this.sessionUser.getTelemetryClient().trackEvent("GetProductsByCategory", props, null);
 
             products = productServiceClient.getProductsByStatus(AVAILABLE.getValue());
             this.sessionUser.setProducts(products);
@@ -63,8 +67,11 @@ public class ProductManagementService {
                         .toList();
             }
 
+            int productCount = products.size();
             log.info("Successfully retrieved {} products for category {} with tags {} [RequestID: {}, TraceID: {}]",
-                    products.size(), category, tags, requestId, traceId);
+                    productCount, category, tags, requestId, traceId);
+
+            this.sessionUser.getTelemetryClient().trackMetric("ProductsReturnedCount", productCount);
 
             return products;
         } catch (FeignException fe) {
