@@ -9,5 +9,5 @@ RUN mvn clean package
 FROM mcr.microsoft.com/azure-functions/java:4-java21
 ENV AzureWebJobsScriptRoot=/home/site/wwwroot
 ENV AzureFunctionsJobHost__Logging__Console__IsEnabled=true
-COPY --from=build /app/target/azure-functions/petstoreorderitemsreserver /home/site/wwwroot
+COPY --from=build /app/target/azure-functions/demo-petstoreorderitemsreserver-westeurope-02 /home/site/wwwroot
 EXPOSE 80

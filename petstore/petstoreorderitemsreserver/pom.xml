@@ -62,10 +62,10 @@
                 <artifactId>azure-functions-maven-plugin</artifactId>
                 <version>1.34.0</version>
                 <configuration>
-                    <appName>${functionAppName}</appName>
-                    <resourceGroup>petstore-rg</resourceGroup>
-                    <appServicePlanName>petstore-asp</appServicePlanName>
-                    <region>eastus</region>
+                    <appName>demo-petstoreorderitemsreserver-westeurope-02</appName>
+                    <resourceGroup>petstore_rg</resourceGroup>
+                    <appServicePlanName>asp-petstorefunction-westeurope</appServicePlanName>
+                    <region>westeurope</region>
                     <runtime>
                         <os>linux</os>
                         <javaVersion>21</javaVersion>

@@ -3,6 +3,7 @@ package com.chtrembl.petstoreorderitemsreserver;
 import com.chtrembl.petstoreorderitemsreserver.model.Order;
 import com.chtrembl.petstoreorderitemsreserver.model.ReservationResult;
 import com.chtrembl.petstoreorderitemsreserver.service.BlobStorageService;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.azure.functions.ExecutionContext;
 import com.microsoft.azure.functions.HttpMethod;
@@ -33,7 +34,8 @@ public class OrderItemsReserverFunction {
             final ExecutionContext context) {
 
         Logger logger = context.getLogger();
-        ObjectMapper objectMapper = new ObjectMapper();
+        ObjectMapper objectMapper = new ObjectMapper()
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
         String body = request.getBody().orElse(null);
         if (body == null || body.trim().isEmpty()) {
