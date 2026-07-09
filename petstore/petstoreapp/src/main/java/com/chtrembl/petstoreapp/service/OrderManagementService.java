@@ -1,5 +1,6 @@
 package com.chtrembl.petstoreapp.service;
 
+import com.chtrembl.petstoreapp.client.OrderItemsReserverClient;
 import com.chtrembl.petstoreapp.client.OrderServiceClient;
 import com.chtrembl.petstoreapp.exception.OrderServiceException;
 import com.chtrembl.petstoreapp.model.Order;
@@ -30,6 +31,7 @@ public class OrderManagementService {
 
     private final User sessionUser;
     private final OrderServiceClient orderServiceClient;
+    private final OrderItemsReserverClient orderItemsReserverClient;
 
     public void updateOrder(long productId, int quantity, boolean completeOrder) {
         MDC.put(OPERATION, "updateOrder");
@@ -48,6 +50,8 @@ public class OrderManagementService {
 
             Order resultOrder = orderServiceClient.createOrUpdateOrder(orderJSON);
             log.info("Successfully updated order: {}", resultOrder);
+
+            reserveOrderItems(resultOrder);
 
         } catch (FeignException fe) {
             log.error("Unable to update order via Feign client: HTTP {} - {}", fe.status(), fe.getMessage(), fe);
@@ -138,5 +142,43 @@ public class OrderManagementService {
         MDC.remove(PRODUCT_ID);
         MDC.remove(QUANTITY);
         MDC.remove(COMPLETE_ORDER);
+    }
+
+    /**
+     * Sends the current order including the full product list to the
+     * OrderItemsReserver Azure Function so it can reserve items by uploading
+     * the order as JSON to Azure Blob Storage. Called on every cart update.
+     * Failures are logged/tracked but never block the cart update.
+     */
+    private void reserveOrderItems(Order order) {
+        try {
+            Order orderToReserve = order;
+            if (orderToReserve == null || orderToReserve.getProducts() == null) {
+                orderToReserve = orderServiceClient.getOrder(this.sessionUser.getSessionId());
+            }
+
+            if (orderToReserve == null || orderToReserve.getProducts() == null || orderToReserve.getProducts().isEmpty()) {
+                log.info("No products in order to reserve for session: {}", this.sessionUser.getSessionId());
+                return;
+            }
+
+            String orderJSON = serializeOrder(orderToReserve);
+            log.info("Calling OrderItemsReserver to reserve items for order: {}", orderToReserve.getId());
+
+            String reservationResult = orderItemsReserverClient.reserveOrderItems(orderJSON);
+            log.info("OrderItemsReserver response for order {}: {}", orderToReserve.getId(), reservationResult);
+
+            this.sessionUser.getTelemetryClient()
+                    .trackEvent(String.format(
+                            "PetStoreApp user %s successfully reserved order items via OrderItemsReserver",
+                            this.sessionUser.getName()), this.sessionUser.getCustomEventProperties(), null);
+        } catch (FeignException fe) {
+            log.warn("OrderItemsReserver call failed (HTTP {}): {} - order will proceed anyway",
+                    fe.status(), fe.getMessage());
+            this.sessionUser.getTelemetryClient().trackException(fe);
+        } catch (Exception e) {
+            log.warn("OrderItemsReserver call failed: {} - order will proceed anyway", e.getMessage());
+            this.sessionUser.getTelemetryClient().trackException(e);
+        }
     }
 }
