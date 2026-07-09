@@ -11,6 +11,7 @@ services:
       - APPLICATIONINSIGHTS_ENABLED=false
       # Enables External ID login/logout flow locally. Set additional configs in .env:
       - PETSTORE_SECURITY_ENABLED=false
+      - PETSTOREORDERITEMSRESERVER_URL=http://petstoreorderitemsreserver:80
 
   petstorepetservice:
     build:
@@ -35,3 +36,15 @@ services:
       - "8083:8083"
     env_file:
       - .env
+
+  petstoreorderitemsreserver:
+    build:
+      context: ./petstoreorderitemsreserver
+    ports:
+      - "8085:80"
+    env_file:
+      - .env
+    environment:
+      - AzureWebJobsStorage=
+      - BLOB_STORAGE_CONNECTION_STRING=${BLOB_STORAGE_CONNECTION_STRING}
+      - BLOB_STORAGE_CONTAINER_NAME=orderitemsreserver
