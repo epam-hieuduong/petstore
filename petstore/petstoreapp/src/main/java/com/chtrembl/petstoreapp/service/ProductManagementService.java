@@ -45,37 +45,35 @@ public class ProductManagementService {
                 requestId, traceId, category);
 
         try {
-            throw new RuntimeException("Cannot move further");
+            Map<String, String> props = new HashMap<>(this.sessionUser.getCustomEventProperties());
+            props.put("username", this.sessionUser.getName());
+            props.put("sessionId", this.sessionUser.getSessionId());
+            props.put("category", category);
 
-//            Map<String, String> props = new HashMap<>(this.sessionUser.getCustomEventProperties());
-//            props.put("username", this.sessionUser.getName());
-//            props.put("sessionId", this.sessionUser.getSessionId());
-//            props.put("category", category);
-//
-//            this.sessionUser.getTelemetryClient().trackEvent("GetProductsByCategory", props, null);
-//
-//            products = productServiceClient.getProductsByStatus(AVAILABLE.getValue());
-//            this.sessionUser.setProducts(products);
-//
-//            if (tags.stream().anyMatch(t -> t.getName().equals("large"))) {
-//                products = products.stream()
-//                        .filter(product -> category.equals(product.getCategory().getName())
-//                                && product.getTags().toString().contains("large"))
-//                        .toList();
-//            } else {
-//                products = products.stream()
-//                        .filter(product -> category.equals(product.getCategory().getName())
-//                                && product.getTags().toString().contains("small"))
-//                        .toList();
-//            }
-//
-//            int productCount = products.size();
-//            log.info("Successfully retrieved {} products for category {} with tags {} [RequestID: {}, TraceID: {}]",
-//                    productCount, category, tags, requestId, traceId);
-//
-//            this.sessionUser.getTelemetryClient().trackMetric("ProductsReturnedCount", productCount);
-//
-//            return products;
+            this.sessionUser.getTelemetryClient().trackEvent("GetProductsByCategory", props, null);
+
+            products = productServiceClient.getProductsByStatus(AVAILABLE.getValue());
+            this.sessionUser.setProducts(products);
+
+            if (tags.stream().anyMatch(t -> t.getName().equals("large"))) {
+                products = products.stream()
+                        .filter(product -> category.equals(product.getCategory().getName())
+                                && product.getTags().toString().contains("large"))
+                        .toList();
+            } else {
+                products = products.stream()
+                        .filter(product -> category.equals(product.getCategory().getName())
+                                && product.getTags().toString().contains("small"))
+                        .toList();
+            }
+
+            int productCount = products.size();
+            log.info("Successfully retrieved {} products for category {} with tags {} [RequestID: {}, TraceID: {}]",
+                    productCount, category, tags, requestId, traceId);
+
+            this.sessionUser.getTelemetryClient().trackMetric("ProductsReturnedCount", productCount);
+
+            return products;
         } catch (FeignException fe) {
             log.error("Feign error retrieving products [RequestID: {}, TraceID: {}, Category: {}, HTTP: {}, Message: {}]",
                     requestId, traceId, category, fe.status(), fe.getMessage(), fe);
