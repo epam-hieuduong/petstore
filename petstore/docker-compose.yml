@@ -20,6 +20,13 @@ services:
       - "8081:8081"
     env_file:
       - .env
+    environment:
+      - PGHOST=${PGHOST}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGPETDATABASE:-petstorepetservice_db}
+      - PGUSER=${PGUSER}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSSLMODE=${PGSSLMODE:-require}
 
   petstoreproductservice:
     build:
@@ -28,6 +35,13 @@ services:
       - "8082:8082"
     env_file:
       - .env
+    environment:
+      - PGHOST=${PGHOST}
+      - PGPORT=${PGPORT:-5432}
+      - PGDATABASE=${PGPRODUCTDATABASE:-petstoreproductservice_db}
+      - PGUSER=${PGUSER}
+      - PGPASSWORD=${PGPASSWORD}
+      - PGSSLMODE=${PGSSLMODE:-require}
 
   petstoreorderservice:
     build:
