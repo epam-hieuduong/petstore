@@ -1,5 +1,6 @@
 package com.chtrembl.petstore.order.service;
 
+import com.chtrembl.petstore.order.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.CacheManager;
@@ -12,14 +13,13 @@ import org.springframework.stereotype.Service;
 public class CacheService {
 
     private final CacheManager cacheManager;
+    private final OrderRepository orderRepository;
 
     public int getOrdersCacheSize() {
         try {
-            org.springframework.cache.concurrent.ConcurrentMapCache mapCache =
-                    (org.springframework.cache.concurrent.ConcurrentMapCache) cacheManager.getCache("orders");
-            return mapCache != null ? mapCache.getNativeCache().size() : 0;
+            return (int) orderRepository.count();
         } catch (Exception e) {
-            log.warn("Could not get orders cache size: {}", e.getMessage());
+            log.warn("Could not get order count from Cosmos DB: {}", e.getMessage());
             return 0;
         }
     }

@@ -1,9 +1,7 @@
 # PetStore Azure Deployment Steps (All Services)
 
-Manual, copy-pasteable Azure CLI steps to containerize and deploy `petstorepetservice`, `petstoreproductservice`, `petstoreorderservice`, and `petstoreapp` to Azure App Service (Linux containers). Pet and Product services are backed by Azure Database for PostgreSQL.
+Manual, copy-pasteable Azure CLI steps to containerize and deploy `petstorepetservice`, `petstoreproductservice`, `petstoreorderservice`, and `petstoreapp` to Azure App Service (Linux containers). Pet and Product services are backed by Azure Database for PostgreSQL. Order service is backed by Azure Cosmos DB.
 
-> `petstoreorderservice` still uses its in-memory cache at this point (Cosmos DB migration is a separate follow-up) - it will deploy and run fine, but order data will not persist across restarts until that migration is done.
->
 > `petstoreorderitemsreserver` is a separate Azure Functions app and is **not** covered by this guide.
 
 > Run these in PowerShell. Requires Azure CLI (`az`) and Docker installed, and `az login` completed.
@@ -201,7 +199,37 @@ psql "host=$PG_FQDN port=5432 dbname=petstoreproductservice_db user=$PG_ADMIN pa
     -f ../petstoreproductservice/src/main/resources/scripts/productservice.sql
 ```
 
-## 8. Configure App Settings on each Web App
+## 8. Create Azure Cosmos DB for Order Service
+
+```powershell
+$COSMOS_ACCOUNT = "petstore-cosmos-01"      # must be globally unique
+
+az cosmosdb create `
+    --resource-group $RG `
+    --name $COSMOS_ACCOUNT `
+    --locations regionName=$LOCATION `
+    --capabilities EnableServerless `
+    --default-consistency-level Session
+
+az cosmosdb sql database create `
+    --resource-group $RG `
+    --account-name $COSMOS_ACCOUNT `
+    --name petstoreorderservice_db
+
+az cosmosdb sql container create `
+    --resource-group $RG `
+    --account-name $COSMOS_ACCOUNT `
+    --database-name petstoreorderservice_db `
+    --name orders `
+    --partition-key-path /id
+
+$COSMOS_URI = az cosmosdb show --resource-group $RG --name $COSMOS_ACCOUNT --query documentEndpoint -o tsv
+$COSMOS_KEY = az cosmosdb keys list --resource-group $RG --name $COSMOS_ACCOUNT --query primaryMasterKey -o tsv
+```
+
+> Serverless mode (`EnableServerless`) is used here for lowest cost - pay per request, no provisioned throughput to manage. Not all regions support serverless; if `cosmosdb create` fails with a capability/region error, drop `--capabilities EnableServerless` and add `--locations regionName=$LOCATION failoverPriority=0` with a `--throughput` on the container/database, or try a different region.
+
+## 9. Configure App Settings on each Web App
 
 ```powershell
 # Pet Service - PostgreSQL connection
@@ -214,10 +242,10 @@ az webapp config appsettings set `
     --resource-group $RG --name petstore-productservice `
     --settings PGHOST=$PG_FQDN PGPORT=5432 PGDATABASE=petstoreproductservice_db PGUSER=$PG_ADMIN PGPASSWORD=$PG_PASSWORD
 
-# Order Service - needs to reach Product Service for order enrichment
+# Order Service - Cosmos DB connection + needs to reach Product Service for order enrichment
 az webapp config appsettings set `
     --resource-group $RG --name petstore-orderservice `
-    --settings PETSTOREPRODUCTSERVICE_URL="https://petstore-productservice.azurewebsites.net"
+    --settings COSMOS_URI=$COSMOS_URI COSMOS_KEY=$COSMOS_KEY COSMOS_DATABASE=petstoreorderservice_db PETSTOREPRODUCTSERVICE_URL="https://petstore-productservice.azurewebsites.net"
 
 # PetStore App (front end) - needs to reach all backend services
 az webapp config appsettings set `
@@ -230,7 +258,7 @@ az webapp config appsettings set `
         APPLICATIONINSIGHTS_ENABLED="false"
 ```
 
-## 9. Restart the apps and verify
+## 10. Restart the apps and verify
 
 ```powershell
 az webapp restart --resource-group $RG --name petstore-petservice
@@ -244,7 +272,7 @@ az webapp restart --resource-group $RG --name petstore-app
 - Product Service Swagger: `https://petstore-productservice.azurewebsites.net/swagger-ui.html`
 - Order Service Swagger: `https://petstore-orderservice.azurewebsites.net/swagger-ui.html`
 
-Try `GET /petstorepetservice/v2/pet/all` and `GET /petstoreproductservice/v2/product/all` (adjust path per each service's actual controller mapping) to confirm data is returned from PostgreSQL. Then open the PetStore App URL, browse pets/products, add to cart, and place an order to confirm the full flow works end-to-end.
+Try `GET /petstorepetservice/v2/pet/all` and `GET /petstoreproductservice/v2/product/all` (adjust path per each service's actual controller mapping) to confirm data is returned from PostgreSQL. Then open the PetStore App URL, browse pets/products, add to cart, and place an order to confirm the full flow works end-to-end. Confirm the order document appears in the Cosmos DB `orders` container (Data Explorer in the Portal), and that it survives an `az webapp restart` of `petstore-orderservice` (proves it's no longer in-memory).
 
 ## Redeploying after code changes
 

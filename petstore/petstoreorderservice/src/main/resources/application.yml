@@ -1,6 +1,12 @@
 spring:
   application:
     name: petstoreorderservice
+  cloud:
+    azure:
+      cosmos:
+        endpoint: ${COSMOS_URI:}
+        key: ${COSMOS_KEY:}
+        database: ${COSMOS_DATABASE:petstoreorderservice_db}
 server:
   port: ${PETSTOREORDERSERVICE_SERVER_PORT:8080}
 
