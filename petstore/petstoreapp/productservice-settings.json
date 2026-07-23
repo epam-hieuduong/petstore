@@ -1,0 +1,7 @@
+﻿[
+  { "name": "PGHOST", "value": "@Microsoft.KeyVault(SecretUri=https://petstore-kv-1234.vault.azure.net/secrets/petstore-pg-host/b6df0af569a7407da09ee3dbe8f68e83)" },
+  { "name": "PGPORT", "value": "5432" },
+  { "name": "PGDATABASE", "value": "petstoreproductservice_db" },
+  { "name": "PGUSER", "value": "@Microsoft.KeyVault(SecretUri=https://petstore-kv-1234.vault.azure.net/secrets/petstore-pg-user/1961627a06b240c7bb0a1f48430a309f)" },
+  { "name": "PGPASSWORD", "value": "@Microsoft.KeyVault(SecretUri=https://petstore-kv-1234.vault.azure.net/secrets/petstore-pg-password/4e7d2fc813d04ab2b91684688dcac70a)" }
+]

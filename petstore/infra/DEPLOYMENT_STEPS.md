@@ -10,9 +10,9 @@ Manual, copy-pasteable Azure CLI steps to containerize and deploy `petstorepetse
 
 ```powershell
 $RG        = "petstore-rg"
-$LOCATION  = "westeurope"
+$LOCATION  = "centralus"
 $ACR_NAME  = "petstoreacr1234"
-$PLAN_NAME = "asp-petstore-westeurope"
+$PLAN_NAME = "asp-petstore-centralus"
 ```
 
 ## 1. Create resource group + Azure Container Registry (ACR)
@@ -54,7 +54,7 @@ az appservice plan create `
     --resource-group $RG `
     --location $LOCATION `
     --is-linux `
-    --sku B1
+    --sku B3
 ```
 
 > Running 4 Java containers on a single B1 plan can be slow to start / time out on log streaming. If you hit that, scale up:
@@ -151,7 +151,6 @@ All four Dockerfiles `EXPOSE 8080` and the apps default to port 8080, so no `WEB
 $PG_SERVER   = "petstore-pg-01"      # must be globally unique
 $PG_ADMIN    = "petstoreadmin"
 $PG_PASSWORD = "<choose-a-strong-password>"
-$LOCATION    = "centralus"
 
 az postgres flexible-server create `
     --resource-group $RG `
@@ -229,18 +228,113 @@ $COSMOS_KEY = az cosmosdb keys list --resource-group $RG --name $COSMOS_ACCOUNT 
 
 > Serverless mode (`EnableServerless`) is used here for lowest cost - pay per request, no provisioned throughput to manage. Not all regions support serverless; if `cosmosdb create` fails with a capability/region error, drop `--capabilities EnableServerless` and add `--locations regionName=$LOCATION failoverPriority=0` with a `--throughput` on the container/database, or try a different region.
 
-## 9. Configure App Settings on each Web App
+## 9. Store PostgreSQL credentials in Azure Key Vault
+
+`petstorepetservice` and `petstoreproductservice` already read `PGHOST` / `PGUSER` / `PGPASSWORD` as environment variables (see `spring.datasource.url/username/password` in each service's `application.yml`), so no code changes are needed - only the *source* of those app settings changes, from plain text to Key Vault references.
+
+### 9.1 Create the Key Vault
 
 ```powershell
-# Pet Service - PostgreSQL connection
+$KV_NAME = "petstore-kv-1234"    # must be globally unique
+
+az keyvault create `
+    --resource-group $RG `
+    --name $KV_NAME `
+    --location $LOCATION
+```
+
+> This uses the default **access policy** permission model (not RBAC), since step 9.4 below grants access via an explicit Key Vault access policy per app.
+
+> **If step 9.2 fails with `(Forbidden) ... ForbiddenByRbac`:** your subscription/CLI defaulted the new vault to the **RBAC** authorization model instead of access policies. Check with:
+> ```powershell
+> az keyvault show --name $KV_NAME --query properties.enableRbacAuthorization
+> ```
+> If `true`, switch it to access policies and grant yourself a policy so you can manage secrets (propagation can take a minute):
+> ```powershell
+> az keyvault update --name $KV_NAME --resource-group $RG --enable-rbac-authorization false
+>
+> $MY_OBJECT_ID = az ad signed-in-user show --query id -o tsv
+> az keyvault set-policy --name $KV_NAME --object-id $MY_OBJECT_ID --secret-permissions get list set delete
+> ```
+
+### 9.2 Store the DB host, username and password as secrets
+
+```powershell
+az keyvault secret set --vault-name $KV_NAME --name petstore-pg-host     --value $PG_FQDN
+az keyvault secret set --vault-name $KV_NAME --name petstore-pg-user     --value $PG_ADMIN
+az keyvault secret set --vault-name $KV_NAME --name petstore-pg-password --value $PG_PASSWORD
+```
+
+> `PGDATABASE` differs per app (`petstorepetservice_db` vs `petstoreproductservice_db`) and isn't sensitive, so it stays a plain app setting in step 10 rather than a Key Vault secret.
+
+### 9.3 Enable managed identity for the two apps that use PostgreSQL
+
+```powershell
+$PETSERVICE_PRINCIPAL_ID = az webapp identity assign `
+    --resource-group $RG --name petstore-petservice --query principalId -o tsv
+
+$PRODUCTSERVICE_PRINCIPAL_ID = az webapp identity assign `
+    --resource-group $RG --name petstore-productservice --query principalId -o tsv
+```
+
+### 9.4 Grant each app's managed identity a Key Vault access policy
+
+```powershell
+az keyvault set-policy `
+    --name $KV_NAME --object-id $PETSERVICE_PRINCIPAL_ID `
+    --secret-permissions get list
+
+az keyvault set-policy `
+    --name $KV_NAME --object-id $PRODUCTSERVICE_PRINCIPAL_ID `
+    --secret-permissions get list
+```
+
+### 9.5 Get the secret URIs
+
+```powershell
+$PG_HOST_SECRET_URI     = az keyvault secret show --vault-name $KV_NAME --name petstore-pg-host     --query id -o tsv
+$PG_USER_SECRET_URI     = az keyvault secret show --vault-name $KV_NAME --name petstore-pg-user     --query id -o tsv
+$PG_PASSWORD_SECRET_URI = az keyvault secret show --vault-name $KV_NAME --name petstore-pg-password --query id -o tsv
+```
+
+> These URIs include a version segment (e.g. `.../secrets/petstore-pg-host/<version>`). Strip the trailing `/<version>` before using them below so Key Vault always resolves the latest version and secret rotation doesn't require re-deploying app settings.
+
+> **Troubleshooting:** if the app setting shows a resolution error in the Portal's "Environment variables" blade instead of "Resolved", the most common causes are a missing `list` permission in the access policy (step 9.4), the managed identity not yet propagated (wait ~1 minute and restart), or the Postgres firewall rule from step 6 not allowing Azure services.
+
+## 10. Configure App Settings on each Web App
+
+> **Windows/PowerShell gotcha:** `az` on Windows is a `.cmd` wrapper that shells out through `cmd.exe`. Even when a `KEY="@Microsoft.KeyVault(...)"` value is quoted in PowerShell, the wrapper can drop the quotes before invoking Python, and `cmd.exe` then treats the bare `(`/`)` as its own grouping syntax - failing with `'PGPORT' was unexpected at this time.` (a `cmd.exe` parser error, not a PowerShell one). Passing settings from a JSON file avoids this entirely, since only the filename ever reaches the command line.
+
+```powershell
+# Pet Service - PostgreSQL connection via Key Vault references
+@"
+[
+  { "name": "PGHOST", "value": "@Microsoft.KeyVault(SecretUri=$PG_HOST_SECRET_URI)" },
+  { "name": "PGPORT", "value": "5432" },
+  { "name": "PGDATABASE", "value": "petstorepetservice_db" },
+  { "name": "PGUSER", "value": "@Microsoft.KeyVault(SecretUri=$PG_USER_SECRET_URI)" },
+  { "name": "PGPASSWORD", "value": "@Microsoft.KeyVault(SecretUri=$PG_PASSWORD_SECRET_URI)" }
+]
+"@ | Set-Content -Path petservice-settings.json -Encoding utf8
+
 az webapp config appsettings set `
     --resource-group $RG --name petstore-petservice `
-    --settings PGHOST=$PG_FQDN PGPORT=5432 PGDATABASE=petstorepetservice_db PGUSER=$PG_ADMIN PGPASSWORD=$PG_PASSWORD
+    --settings "@petservice-settings.json"
 
-# Product Service - PostgreSQL connection
+# Product Service - PostgreSQL connection via Key Vault references
+@"
+[
+  { "name": "PGHOST", "value": "@Microsoft.KeyVault(SecretUri=$PG_HOST_SECRET_URI)" },
+  { "name": "PGPORT", "value": "5432" },
+  { "name": "PGDATABASE", "value": "petstoreproductservice_db" },
+  { "name": "PGUSER", "value": "@Microsoft.KeyVault(SecretUri=$PG_USER_SECRET_URI)" },
+  { "name": "PGPASSWORD", "value": "@Microsoft.KeyVault(SecretUri=$PG_PASSWORD_SECRET_URI)" }
+]
+"@ | Set-Content -Path productservice-settings.json -Encoding utf8
+
 az webapp config appsettings set `
     --resource-group $RG --name petstore-productservice `
-    --settings PGHOST=$PG_FQDN PGPORT=5432 PGDATABASE=petstoreproductservice_db PGUSER=$PG_ADMIN PGPASSWORD=$PG_PASSWORD
+    --settings "@productservice-settings.json"
 
 # Order Service - Cosmos DB connection + needs to reach Product Service for order enrichment
 az webapp config appsettings set `
@@ -258,7 +352,13 @@ az webapp config appsettings set `
         APPLICATIONINSIGHTS_ENABLED="false"
 ```
 
-## 10. Restart the apps and verify
+> Verify resolution after restarting (step 11) with:
+> ```powershell
+> az webapp config appsettings list --resource-group $RG --name petstore-petservice --query "[?name=='PGHOST']"
+> ```
+> or check the "Resolved"/error status in the Portal's App Service > Environment variables blade.
+
+## 11. Restart the apps and verify
 
 ```powershell
 az webapp restart --resource-group $RG --name petstore-petservice
