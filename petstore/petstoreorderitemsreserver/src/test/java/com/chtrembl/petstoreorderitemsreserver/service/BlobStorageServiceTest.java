@@ -13,16 +13,20 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Regression tests for requirements 5 and 6: the blob is named after the
+ * Regression tests for requirements 5 and 6 (the blob is named after the
  * session id and overwritten on every update, and the full product list
- * survives the round trip from the incoming Service Bus message JSON.
+ * survives the round trip from the incoming Service Bus message JSON), and
+ * requirement 7 (up to 3 upload attempts before failing the invocation).
  */
 public class BlobStorageServiceTest {
 
@@ -54,6 +58,46 @@ public class BlobStorageServiceTest {
 
         assertEquals(firstBlobName, secondBlobName);
         verify(containerClient, org.mockito.Mockito.times(2)).getBlobClient("order-session-42.json");
+    }
+
+    @Test
+    public void uploadOrderRetriesOnTransientFailureAndSucceedsWithinThreeAttempts() throws Exception {
+        BlobContainerClient containerClient = mock(BlobContainerClient.class);
+        BlobClient blobClient = mock(BlobClient.class);
+        when(containerClient.getBlobClient("order-retry-session.json")).thenReturn(blobClient);
+
+        doThrow(new RuntimeException("transient network error"))
+                .doThrow(new RuntimeException("transient network error"))
+                .doNothing()
+                .when(blobClient).upload(org.mockito.ArgumentMatchers.any(InputStream.class), anyLong(), eq(true));
+
+        BlobStorageService service = new BlobStorageService(containerClient);
+
+        String blobName = service.uploadOrder("retry-session", "{\"id\":\"retry-session\"}");
+
+        assertEquals("order-retry-session.json", blobName);
+        verify(blobClient, times(3)).upload(org.mockito.ArgumentMatchers.any(InputStream.class), anyLong(), eq(true));
+    }
+
+    @Test
+    public void uploadOrderThrowsAfterExhaustingThreeAttempts() {
+        BlobContainerClient containerClient = mock(BlobContainerClient.class);
+        BlobClient blobClient = mock(BlobClient.class);
+        when(containerClient.getBlobClient("order-always-failing.json")).thenReturn(blobClient);
+
+        doThrow(new RuntimeException("blob storage unavailable"))
+                .when(blobClient).upload(org.mockito.ArgumentMatchers.any(InputStream.class), anyLong(), eq(true));
+
+        BlobStorageService service = new BlobStorageService(containerClient);
+
+        try {
+            service.uploadOrder("always-failing", "{\"id\":\"always-failing\"}");
+            fail("Expected uploadOrder to throw after exhausting retry attempts");
+        } catch (RuntimeException expected) {
+            assertTrue(expected.getMessage().contains("attempt 3/3"));
+        }
+
+        verify(blobClient, times(3)).upload(org.mockito.ArgumentMatchers.any(InputStream.class), anyLong(), eq(true));
     }
 
     @Test

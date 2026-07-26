@@ -18,10 +18,14 @@ public class BlobStorageService {
 
     private static final String DEFAULT_CONTAINER_NAME = "orderitemsreserver";
 
+    private static final int MAX_UPLOAD_ATTEMPTS = 3;
+    private static final long RETRY_BASE_DELAY_MILLIS = 200;
+
     private final BlobContainerClient containerClient;
+    private final Logger logger;
 
     public BlobStorageService(Logger logger) {
-        this(buildContainerClient(logger));
+        this(buildContainerClient(logger), logger);
     }
 
     /**
@@ -29,7 +33,12 @@ public class BlobStorageService {
      * {@link BlobContainerClient} without hitting real Azure Storage.
      */
     BlobStorageService(BlobContainerClient containerClient) {
+        this(containerClient, Logger.getLogger(BlobStorageService.class.getName()));
+    }
+
+    BlobStorageService(BlobContainerClient containerClient, Logger logger) {
         this.containerClient = containerClient;
+        this.logger = logger;
     }
 
     private static BlobContainerClient buildContainerClient(Logger logger) {
@@ -65,14 +74,33 @@ public class BlobStorageService {
     public String uploadOrder(String sessionId, String orderJson) {
         String blobName = "order-" + sessionId + ".json";
         BlobClient blobClient = containerClient.getBlobClient(blobName);
-
         byte[] bytes = orderJson.getBytes(StandardCharsets.UTF_8);
-        try (ByteArrayInputStream dataStream = new ByteArrayInputStream(bytes)) {
-            blobClient.upload(dataStream, bytes.length, true);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to upload order blob: " + blobName, e);
+
+        RuntimeException lastFailure = null;
+        for (int attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
+            try (ByteArrayInputStream dataStream = new ByteArrayInputStream(bytes)) {
+                blobClient.upload(dataStream, bytes.length, true);
+                if (attempt > 1) {
+                    logger.info("Uploaded blob " + blobName + " on attempt " + attempt + "/" + MAX_UPLOAD_ATTEMPTS);
+                }
+                return blobName;
+            } catch (Exception e) {
+                lastFailure = new RuntimeException(
+                        "Failed to upload order blob: " + blobName
+                                + " (attempt " + attempt + "/" + MAX_UPLOAD_ATTEMPTS + ")", e);
+                logger.warning(lastFailure.getMessage() + ": " + e.getMessage());
+
+                if (attempt < MAX_UPLOAD_ATTEMPTS) {
+                    try {
+                        Thread.sleep(RETRY_BASE_DELAY_MILLIS * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw lastFailure;
+                    }
+                }
+            }
         }
 
-        return blobName;
+        throw lastFailure;
     }
 }
