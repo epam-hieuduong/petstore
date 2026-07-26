@@ -99,5 +99,5 @@ Then update the cart from the PetStoreApp UI and confirm:
 
 ## Next steps
 
-- Dead-letter monitoring + email fallback via Logic App: see the Logic App
-  deployment doc added as part of Phase 8 of the implementation plan.
+- Dead-letter monitoring + email fallback via Logic App: see
+  `infra/LOGIC_APP_DEADLETTER_FALLBACK.md`.

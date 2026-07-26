@@ -20,7 +20,8 @@ import java.util.logging.Logger;
  * so it becomes visible again and is redelivered. Once the queue's configured
  * max delivery count is reached (see infra/SERVICE_BUS_DEPLOYMENT.md, set to
  * 3), Service Bus automatically dead-letters the message, which the fallback
- * Logic App monitors to notify the manager (see AZURE_DEPLOYMENT.md).</p>
+ * Logic App monitors to notify the manager (see
+ * infra/LOGIC_APP_DEADLETTER_FALLBACK.md).</p>
  */
 public class OrderItemsReserverFunction {
 
