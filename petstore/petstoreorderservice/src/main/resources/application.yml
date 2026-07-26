@@ -15,6 +15,10 @@ petstore:
     product:
       url: ${PETSTOREPRODUCTSERVICE_URL:http://localhost:8082}
 
+servicebus:
+  connection-string: ${SERVICEBUS_CONNECTION_STRING:}
+  queue-name: ${SERVICEBUS_QUEUE_NAME:order-items-reservation}
+
 springdoc:
   api-docs:
     path: /api-docs

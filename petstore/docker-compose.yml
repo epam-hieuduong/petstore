@@ -11,7 +11,6 @@ services:
       - APPLICATIONINSIGHTS_ENABLED=false
       # Enables External ID login/logout flow locally. Set additional configs in .env:
       - PETSTORE_SECURITY_ENABLED=false
-      - PETSTOREORDERITEMSRESERVER_URL=http://petstoreorderitemsreserver:80
 
   petstorepetservice:
     build:
@@ -50,6 +49,9 @@ services:
       - "8083:8083"
     env_file:
       - .env
+    environment:
+      - SERVICEBUS_CONNECTION_STRING=${SERVICEBUS_CONNECTION_STRING}
+      - SERVICEBUS_QUEUE_NAME=${SERVICEBUS_QUEUE_NAME:-order-items-reservation}
 
   petstoreorderitemsreserver:
     build:

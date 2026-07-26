@@ -24,6 +24,7 @@
         <maven.build.timestamp.format>yyyy-MM-dd'T'HH:mm:ss</maven.build.timestamp.format>
         <httpclient.version>4.5.14</httpclient.version>
         <spring-cloud-azure.version>6.4.0</spring-cloud-azure.version>
+        <azure.messaging.servicebus.version>7.17.5</azure.messaging.servicebus.version>
     </properties>
 
     <dependencyManagement>
@@ -73,6 +74,11 @@
             <groupId>org.apache.httpcomponents</groupId>
             <artifactId>httpclient</artifactId>
             <version>${httpclient.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-messaging-servicebus</artifactId>
+            <version>${azure.messaging.servicebus.version}</version>
         </dependency>
     </dependencies>
 
