@@ -21,6 +21,18 @@ public class BlobStorageService {
     private final BlobContainerClient containerClient;
 
     public BlobStorageService(Logger logger) {
+        this(buildContainerClient(logger));
+    }
+
+    /**
+     * Package-private constructor allowing tests to inject a mocked
+     * {@link BlobContainerClient} without hitting real Azure Storage.
+     */
+    BlobStorageService(BlobContainerClient containerClient) {
+        this.containerClient = containerClient;
+    }
+
+    private static BlobContainerClient buildContainerClient(Logger logger) {
         String connectionString = System.getenv("BLOB_STORAGE_CONNECTION_STRING");
         if (connectionString == null || connectionString.trim().isEmpty()) {
             throw new IllegalStateException("BLOB_STORAGE_CONNECTION_STRING is not configured");
@@ -40,7 +52,7 @@ public class BlobStorageService {
             logger.info("Blob container '" + containerName + "' does not exist, creating it");
             client.create();
         }
-        this.containerClient = client;
+        return client;
     }
 
     /**
