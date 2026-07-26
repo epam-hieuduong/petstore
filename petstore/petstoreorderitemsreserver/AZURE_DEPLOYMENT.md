@@ -13,6 +13,7 @@ $PLAN_NAME     = "asp-petstorefunction-westeurope"
 $FUNC_NAME     = "demo-petstoreorderitemsreserver-westeurope-02"
 $IMAGE_TAG     = "v1.0.0"
 $IMAGE_NAME    = "petstoreorderitemsreserver:$IMAGE_TAG"
+$SB_NS         = "petstoreservicebus1234"          # must match infra/SERVICE_BUS_DEPLOYMENT.md's $SB_NS
 ```
 
 ## 1. Storage account (AzureWebJobsStorage runtime + reservation blobs)
@@ -76,30 +77,40 @@ az functionapp create `
 
 > If ACR admin user is disabled, enable it first: `az acr update --name $ACR_NAME --admin-enabled true` — or switch to a managed identity + `az functionapp identity assign` + `az role assignment create` (AcrPull) instead of admin credentials.
 
-## 5. App settings (Blob Storage config + disable default content share for containers)
+## 5. App settings (Blob Storage + Service Bus config, disable default content share for containers)
 
 ```powershell
+$SB_CONN = az servicebus namespace authorization-rule keys list `
+  --resource-group $RG `
+  --namespace-name $SB_NS `
+  --name RootManageSharedAccessKey `
+  --query primaryConnectionString -o tsv
+
 az functionapp config appsettings set `
   --name $FUNC_NAME `
   --resource-group $RG `
   --settings `
     "BLOB_STORAGE_CONNECTION_STRING=$STORAGE_CONN" `
     "BLOB_STORAGE_CONTAINER_NAME=orderitemsreserver" `
+    "SERVICEBUS_CONNECTION=$SB_CONN" `
+    "SERVICEBUS_QUEUE_NAME=order-items-reservation" `
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE=false" `
     "FUNCTIONS_WORKER_RUNTIME=java"
 ```
 
-## 6. Point PetStoreApp at the new Function
+> Requires the Service Bus namespace + queue to already exist - run `infra/SERVICE_BUS_DEPLOYMENT.md` steps 1-2 first (with `$SB_NS` matching the value set above).
 
-Update the already-deployed `demo-petstoreapp-westeurope-02` App Service:
+## 6. Point PetStoreOrderService at the Service Bus queue
+
+The Function no longer has an HTTP endpoint - PetStoreOrderService publishes to the Service Bus queue instead of calling this Function directly. Configure the already-deployed `petstore-orderservice` App Service (see `infra/SERVICE_BUS_DEPLOYMENT.md` step 4):
 
 ```powershell
 az webapp config appsettings set `
-  --name demo-petstoreapp-westeurope-02 `
+  --name petstore-orderservice `
   --resource-group $RG `
-  --settings "PETSTOREORDERITEMSRESERVER_URL=https://$FUNC_NAME.azurewebsites.net"
+  --settings "SERVICEBUS_CONNECTION_STRING=$SB_CONN" "SERVICEBUS_QUEUE_NAME=order-items-reservation"
 
-az webapp restart --name demo-petstoreapp-westeurope-02 --resource-group $RG
+az webapp restart --name petstore-orderservice --resource-group $RG
 ```
 
 ## 7. Verify
@@ -107,11 +118,16 @@ az webapp restart --name demo-petstoreapp-westeurope-02 --resource-group $RG
 ```powershell
 az functionapp show --name $FUNC_NAME --resource-group $RG --query state -o tsv   # should be "Running"
 
-curl -X POST "https://$FUNC_NAME.azurewebsites.net/api/reserveOrderItems" `
-  -H "Content-Type: application/json" `
-  -d '{"id":"test-session-1","email":"test@example.com","complete":false,"products":[{"id":1,"quantity":2}]}'
+# Send a test message directly to the queue instead of an HTTP call:
+az servicebus queue message send `
+  --resource-group $RG `
+  --namespace-name $SB_NS `
+  --queue-name order-items-reservation `
+  --body '{"id":"test-session-1","email":"test@example.com","complete":false,"products":[{"id":1,"quantity":2}]}'
 ```
-Then check the `orderitemsreserver` container in `$STORAGE_NAME` for `order-test-session-1.json`.
+Then check the `orderitemsreserver` container in `$STORAGE_NAME` for `order-test-session-1.json`, and `az functionapp function list --name $FUNC_NAME --resource-group $RG -o table` / `az webapp log tail` to confirm the `reserveOrderItems` Service Bus trigger fired.
+
+> `az servicebus queue message send` requires a recent Azure CLI with the `servicebus` extension (`az extension add --name servicebus`). Alternatively, trigger it end-to-end by updating the cart from the PetStoreApp UI.
 
 ## Troubleshooting: ImageNotFoundFailure pulling from docker.io
 
