@@ -1,10 +1,25 @@
 # PetStore Azure Deployment Steps (All Services)
 
-Manual, copy-pasteable Azure CLI steps to containerize and deploy `petstorepetservice`, `petstoreproductservice`, `petstoreorderservice`, and `petstoreapp` to Azure App Service (Linux containers). Pet and Product services are backed by Azure Database for PostgreSQL. Order service is backed by Azure Cosmos DB.
+Manual, copy-pasteable Azure CLI steps to deploy the entire PetStore stack:
+`petstorepetservice`, `petstoreproductservice`, `petstoreorderservice`, and
+`petstoreapp` as containers on Azure App Service (Part A), plus
+`petstoreorderitemsreserver` as a container Azure Function connected via
+Service Bus with a Logic App dead-letter fallback (Part B).
 
-> `petstoreorderitemsreserver` is a separate Azure Functions app and is **not** covered by this guide.
+Pet and Product services are backed by Azure Database for PostgreSQL. Order
+service is backed by Azure Cosmos DB and publishes to Service Bus on every
+cart update; OrderItemsReserver consumes those messages and uploads order
+JSON to Blob Storage.
 
 > Run these in PowerShell. Requires Azure CLI (`az`) and Docker installed, and `az login` completed.
+
+> Parts A and B share the same `$RG`/`$LOCATION`/`$ACR_NAME` set in Part A
+> step 0 - there's no technical requirement to split them across resource
+> groups or regions.
+
+---
+
+# Part A: Core services (Pet, Product, Order, App)
 
 ## 0. Set shared variables
 
@@ -228,7 +243,9 @@ $COSMOS_KEY = az cosmosdb keys list --resource-group $RG --name $COSMOS_ACCOUNT 
 
 > Serverless mode (`EnableServerless`) is used here for lowest cost - pay per request, no provisioned throughput to manage. Not all regions support serverless; if `cosmosdb create` fails with a capability/region error, drop `--capabilities EnableServerless` and add `--locations regionName=$LOCATION failoverPriority=0` with a `--throughput` on the container/database, or try a different region.
 
-## 9. Store PostgreSQL credentials in Azure Key Vault
+## 9. (Optional) Store PostgreSQL credentials in Azure Key Vault
+
+> **This step is optional.** Step 10 below configures `petstore-petservice`/`petstore-productservice` with plain-text `PGHOST`/`PGUSER`/`PGPASSWORD` app settings by default (same treatment as `COSMOS_URI`/`COSMOS_KEY` for the Order Service) - skip straight to step 10 if you don't need Key Vault-backed secrets. Do this step first only if you want the hardened setup where credentials live in Key Vault instead of as plain app settings.
 
 `petstorepetservice` and `petstoreproductservice` already read `PGHOST` / `PGUSER` / `PGPASSWORD` as environment variables (see `spring.datasource.url/username/password` in each service's `application.yml`), so no code changes are needed - only the *source* of those app settings changes, from plain text to Key Vault references.
 
@@ -303,38 +320,18 @@ $PG_PASSWORD_SECRET_URI = az keyvault secret show --vault-name $KV_NAME --name p
 
 ## 10. Configure App Settings on each Web App
 
-> **Windows/PowerShell gotcha:** `az` on Windows is a `.cmd` wrapper that shells out through `cmd.exe`. Even when a `KEY="@Microsoft.KeyVault(...)"` value is quoted in PowerShell, the wrapper can drop the quotes before invoking Python, and `cmd.exe` then treats the bare `(`/`)` as its own grouping syntax - failing with `'PGPORT' was unexpected at this time.` (a `cmd.exe` parser error, not a PowerShell one). Passing settings from a JSON file avoids this entirely, since only the filename ever reaches the command line.
+> **Windows/PowerShell gotcha:** `az` on Windows is a `.cmd` wrapper that shells out through `cmd.exe`. Even when a value containing parentheses is quoted in PowerShell (e.g. a Key Vault reference, see the alternative below), the wrapper can drop the quotes before invoking Python, and `cmd.exe` then treats the bare `(`/`)` as its own grouping syntax - failing with `'PGPORT' was unexpected at this time.` (a `cmd.exe` parser error, not a PowerShell one). Passing settings from a JSON file avoids this entirely, since only the filename ever reaches the command line.
 
 ```powershell
-# Pet Service - PostgreSQL connection via Key Vault references
-@"
-[
-  { "name": "PGHOST", "value": "@Microsoft.KeyVault(SecretUri=$PG_HOST_SECRET_URI)" },
-  { "name": "PGPORT", "value": "5432" },
-  { "name": "PGDATABASE", "value": "petstorepetservice_db" },
-  { "name": "PGUSER", "value": "@Microsoft.KeyVault(SecretUri=$PG_USER_SECRET_URI)" },
-  { "name": "PGPASSWORD", "value": "@Microsoft.KeyVault(SecretUri=$PG_PASSWORD_SECRET_URI)" }
-]
-"@ | Set-Content -Path petservice-settings.json -Encoding utf8
-
+# Pet Service - plain-text PostgreSQL connection settings
 az webapp config appsettings set `
     --resource-group $RG --name petstore-petservice `
-    --settings "@petservice-settings.json"
+    --settings PGHOST=$PG_FQDN PGPORT=5432 PGDATABASE=petstorepetservice_db PGUSER=$PG_ADMIN PGPASSWORD=$PG_PASSWORD
 
-# Product Service - PostgreSQL connection via Key Vault references
-@"
-[
-  { "name": "PGHOST", "value": "@Microsoft.KeyVault(SecretUri=$PG_HOST_SECRET_URI)" },
-  { "name": "PGPORT", "value": "5432" },
-  { "name": "PGDATABASE", "value": "petstoreproductservice_db" },
-  { "name": "PGUSER", "value": "@Microsoft.KeyVault(SecretUri=$PG_USER_SECRET_URI)" },
-  { "name": "PGPASSWORD", "value": "@Microsoft.KeyVault(SecretUri=$PG_PASSWORD_SECRET_URI)" }
-]
-"@ | Set-Content -Path productservice-settings.json -Encoding utf8
-
+# Product Service - plain-text PostgreSQL connection settings
 az webapp config appsettings set `
     --resource-group $RG --name petstore-productservice `
-    --settings "@productservice-settings.json"
+    --settings PGHOST=$PG_FQDN PGPORT=5432 PGDATABASE=petstoreproductservice_db PGUSER=$PG_ADMIN PGPASSWORD=$PG_PASSWORD
 
 # Order Service - Cosmos DB connection + needs to reach Product Service for order enrichment
 az webapp config appsettings set `
@@ -352,11 +349,11 @@ az webapp config appsettings set `
         APPLICATIONINSIGHTS_ENABLED="false"
 ```
 
-> Verify resolution after restarting (step 11) with:
+> Verify after restarting (step 11) with:
 > ```powershell
 > az webapp config appsettings list --resource-group $RG --name petstore-petservice --query "[?name=='PGHOST']"
 > ```
-> or check the "Resolved"/error status in the Portal's App Service > Environment variables blade.
+> If you used step 9's Key Vault-backed alternative instead, replace the `--settings` lines above with `PGHOST/PGUSER/PGPASSWORD` values of `"@Microsoft.KeyVault(SecretUri=$PG_HOST_SECRET_URI)"` etc. (passed via a JSON file per the Windows/PowerShell gotcha above), and check the "Resolved"/error status in the Portal's App Service > Environment variables blade.
 
 ## 11. Restart the apps and verify
 
@@ -374,7 +371,7 @@ az webapp restart --resource-group $RG --name petstore-app
 
 Try `GET /petstorepetservice/v2/pet/all` and `GET /petstoreproductservice/v2/product/all` (adjust path per each service's actual controller mapping) to confirm data is returned from PostgreSQL. Then open the PetStore App URL, browse pets/products, add to cart, and place an order to confirm the full flow works end-to-end. Confirm the order document appears in the Cosmos DB `orders` container (Data Explorer in the Portal), and that it survives an `az webapp restart` of `petstore-orderservice` (proves it's no longer in-memory).
 
-## Redeploying after code changes
+## Redeploying after code changes (Part A)
 
 Repeat step 2 (build + push new image tag or `:latest`) for the service you changed, then restart the corresponding Web App:
 
@@ -382,4 +379,294 @@ Repeat step 2 (build + push new image tag or `:latest`) for the service you chan
 docker build -t "$ACR_LOGIN_SERVER/petstorepetservice:latest" ../petstorepetservice
 docker push "$ACR_LOGIN_SERVER/petstorepetservice:latest"
 az webapp restart --resource-group $RG --name petstore-petservice
+```
+
+---
+
+# Part B: OrderItemsReserver (Service Bus + Function App + Logic App fallback)
+
+`petstoreorderservice` (already deployed in Part A) publishes an order JSON
+message to a Service Bus queue on every cart update. `petstoreorderitemsreserver`
+is a separate container Azure Function, triggered by that queue, which uploads
+the order JSON to Blob Storage. If it fails 3 times, Service Bus dead-letters
+the message and a Logic App emails a manager as a fallback.
+
+## B0. Variables
+
+Reuses `$RG`/`$LOCATION`/`$ACR_NAME` from Part A step 0.
+
+```powershell
+$SB_NS          = "petstoreservicebus1234"    # 6-50 chars, globally unique
+$SB_QUEUE       = "order-items-reservation"
+$STORAGE_NAME   = "petstoreitemsreserve01"    # 3-24 lowercase alphanumeric, globally unique
+$FUNC_PLAN_NAME = "asp-petstorefunction-centralus"
+$FUNC_NAME      = "petstore-orderitemsreserver"
+$IMAGE_NAME     = "petstoreorderitemsreserver:v1.0.0"
+```
+
+> If you deploy the Function App with `mvn azure-functions:deploy` instead of
+> the CLI/container steps below, that plugin's `<appName>`/`<resourceGroup>`/
+> `<region>` in `petstoreorderitemsreserver/pom.xml` are configured
+> independently and won't automatically match `$FUNC_NAME`/`$RG`/`$LOCATION`
+> here - update both places consistently if you use that flow.
+
+## B1. Create the Service Bus namespace + queue
+
+Standard tier is required for dead-letter queue (DLQ) support. `--max-delivery-count 3`
+means Service Bus dead-letters a message after 3 failed delivery attempts if
+the function throws/abandons it - this backs up the function's own in-code
+retry-then-throw logic (`BlobStorageService.uploadOrder`, up to 3 attempts).
+
+```powershell
+az servicebus namespace create `
+  --resource-group $RG `
+  --name $SB_NS `
+  --location $LOCATION `
+  --sku Standard
+
+az servicebus queue create `
+  --resource-group $RG `
+  --namespace-name $SB_NS `
+  --name $SB_QUEUE `
+  --max-delivery-count 3 `
+  --default-message-time-to-live P14D
+
+$SB_CONN = az servicebus namespace authorization-rule keys list `
+  --resource-group $RG `
+  --namespace-name $SB_NS `
+  --name RootManageSharedAccessKey `
+  --query primaryConnectionString -o tsv
+```
+
+## B2. Point petstoreorderservice (publisher) at the queue
+
+```powershell
+az webapp config appsettings set `
+  --resource-group $RG `
+  --name petstore-orderservice `
+  --settings "SERVICEBUS_CONNECTION_STRING=$SB_CONN" "SERVICEBUS_QUEUE_NAME=$SB_QUEUE"
+
+az webapp restart --resource-group $RG --name petstore-orderservice
+```
+
+## B3. Storage account for the Function (runtime + reservation blobs)
+
+One account, two containers: `azure-webjobs-*` (auto-created by the Functions runtime) and `orderitemsreserver` (order JSON blobs).
+
+```powershell
+az storage account create `
+  --name $STORAGE_NAME `
+  --resource-group $RG `
+  --location $LOCATION `
+  --sku Standard_LRS `
+  --kind StorageV2
+
+$STORAGE_CONN = az storage account show-connection-string `
+  --name $STORAGE_NAME --resource-group $RG --query connectionString -o tsv
+
+az storage container create `
+  --name orderitemsreserver `
+  --connection-string $STORAGE_CONN
+```
+
+## B4. Build and push the Function container image
+
+Run from the `petstoreorderitemsreserver` directory (uses the `Dockerfile` already in this module).
+
+```powershell
+az acr build --registry $ACR_NAME --image $IMAGE_NAME .
+```
+
+## B5. Linux App Service Plan + Function App from the container image
+
+B1 (Basic) is sufficient for a Linux custom-container Function App; bump to a Premium plan (EP1) later if you need faster cold starts or VNet integration.
+
+```powershell
+az appservice plan create `
+  --name $FUNC_PLAN_NAME `
+  --resource-group $RG `
+  --location $LOCATION `
+  --sku B1 `
+  --is-linux
+
+$ACR_LOGIN_SERVER = az acr show --name $ACR_NAME --query loginServer -o tsv
+$ACR_USERNAME     = az acr credential show --name $ACR_NAME --query username -o tsv
+$ACR_PASSWORD     = az acr credential show --name $ACR_NAME --query "passwords[0].value" -o tsv
+
+az functionapp create `
+  --name $FUNC_NAME `
+  --resource-group $RG `
+  --plan $FUNC_PLAN_NAME `
+  --storage-account $STORAGE_NAME `
+  --functions-version 4 `
+  --image "$ACR_LOGIN_SERVER/$IMAGE_NAME" `
+  --registry-username $ACR_USERNAME `
+  --registry-password $ACR_PASSWORD
+```
+
+> If ACR admin user is disabled, enable it first: `az acr update --name $ACR_NAME --admin-enabled true` - or switch to a managed identity + `az functionapp identity assign` + `az role assignment create` (AcrPull) instead of admin credentials.
+
+## B6. Function App settings (Blob Storage + Service Bus)
+
+```powershell
+az functionapp config appsettings set `
+  --name $FUNC_NAME `
+  --resource-group $RG `
+  --settings `
+    "BLOB_STORAGE_CONNECTION_STRING=$STORAGE_CONN" `
+    "BLOB_STORAGE_CONTAINER_NAME=orderitemsreserver" `
+    "SERVICEBUS_CONNECTION=$SB_CONN" `
+    "SERVICEBUS_QUEUE_NAME=$SB_QUEUE" `
+    "WEBSITES_ENABLE_APP_SERVICE_STORAGE=false" `
+    "FUNCTIONS_WORKER_RUNTIME=java"
+
+az webapp restart --resource-group $RG --name $FUNC_NAME
+```
+
+> App settings changes normally trigger an automatic restart, but restarting explicitly avoids relying on that timing before B7's verification.
+
+## B7. Verify
+
+```powershell
+az functionapp show --name $FUNC_NAME --resource-group $RG --query state -o tsv   # should be "Running"
+```
+
+The Azure CLI has no data-plane command to send a message directly to a queue
+(`az servicebus queue` only supports `create`/`list`/`show`/`update`), so send
+a test message one of these ways instead:
+- **Easiest**: update the cart from the PetStoreApp UI - this exercises the
+  real end-to-end path through `petstoreorderservice`.
+- **Manual test message**: Portal > the `$SB_NS` namespace > `$SB_QUEUE` >
+  **Service Bus Explorer (preview)** > **Send messages**, with body
+  `{"id":"test-session-1","email":"test@example.com","complete":false,"products":[{"id":1,"quantity":2}]}`.
+
+Then check the `orderitemsreserver` container in `$STORAGE_NAME` for
+`order-test-session-1.json` (or `order-<sessionId>.json` for the UI test), and
+`az functionapp function list --name $FUNC_NAME --resource-group $RG -o table`
+/ `az webapp log tail --name $FUNC_NAME --resource-group $RG` to confirm the
+`reserveOrderItems` Service Bus trigger fired.
+
+## B8. Logic App: dead-letter monitoring + email fallback
+
+When `reserveOrderItems` exhausts its 3 in-process upload retries and throws,
+the Service Bus message is left uncompleted and redelivered. Once the queue's
+`max-delivery-count` (3, from step B1) is reached, Service Bus automatically
+moves the message to the dead-letter sub-queue (`$SB_QUEUE/$DeadLetterQueue`).
+This Logic App watches that sub-queue and emails a manager so the order can be
+reserved manually.
+
+The Service Bus connector uses a SAS connection string (no interactive
+consent needed), but the email connector (Outlook.com or Office 365) needs a
+one-time interactive sign-in, so build this via the **Logic App Designer in
+the Azure Portal** rather than pure CLI/ARM.
+
+1. Create an empty Consumption Logic App. As with step 10's app settings, an
+   inline JSON string hits the same Windows/`cmd.exe` quote-mangling issue
+   (`az` shells out through `cmd.exe`, which strips the quotes before the
+   JSON reaches the parser, causing a `Shorthand Syntax Error`) - pass it from
+   the checked-in `infra/logic-app-empty-definition.json` file instead. Note
+   `az logic workflow create --definition` expects an ARM resource fragment
+   with the workflow nested under a top-level `definition` key (not the raw
+   Workflow Definition Language JSON on its own), and it takes a plain file
+   path (no `@` prefix needed):
+   ```powershell
+   $LOGICAPP_NAME = "petstore-orderitemsreserver-dlq-fallback"
+
+   az logic workflow create `
+     --resource-group $RG `
+     --location $LOCATION `
+     --name $LOGICAPP_NAME `
+     --definition .\infra\logic-app-empty-definition.json
+   ```
+   > First run adds the `logic` CLI extension - accept the prompt, or
+   > pre-approve with `az config set extension.use_dynamic_install=yes_without_prompt`.
+2. Portal > the `$LOGICAPP_NAME` Logic App > **Logic app designer**. Add
+   trigger **Service Bus > When a message is received in a queue (peek-lock)**:
+   - Connection string: `$SB_CONN` from step B1 (or a scoped `Listen`-only SAS policy).
+   - **Queue name**: `order-items-reservation`; **Queue type**: **Dead-letter queue**.
+   - **Interval**: `1`, **Frequency**: `Minute`.
+3. Add action **Parse JSON** on `@{triggerBody()?['ContentData']}` with schema:
+   ```json
+   {
+     "type": "object",
+     "properties": {
+       "id": { "type": "string" },
+       "email": { "type": "string" },
+       "complete": { "type": "boolean" },
+       "products": {
+         "type": "array",
+         "items": {
+           "type": "object",
+           "properties": {
+             "id": { "type": "integer" },
+             "name": { "type": "string" },
+             "quantity": { "type": "integer" }
+           }
+         }
+       }
+     }
+   }
+   ```
+   The dead-letter reason/description are trigger properties:
+   `@{triggerBody()?['DeadLetterReason']}` / `@{triggerBody()?['DeadLetterErrorDescription']}`.
+4. Add action **Outlook.com** or **Office 365 Outlook > Send an email (V2)**
+   (sign in to create the connection):
+   - **To**: the manager's email address.
+   - **Subject**: `Order reservation failed - session @{body('Parse_JSON')?['id']}`
+   - **Body**: include `@{body('Parse_JSON')?['id']/['email']/['complete']/['products']}`
+     and `@{triggerBody()?['DeadLetterReason']/['DeadLetterErrorDescription']}`.
+5. Add action **Service Bus > Complete the message in a queue** (same
+   connection; **Queue type**: **Dead-letter queue**; **Lock token**:
+   `@{triggerBody()?['LockToken']}`) so it doesn't stay locked/reprocessed.
+6. Save, then test: manually dead-letter a message via the Portal's Service
+   Bus Explorer (Queue > Service Bus Explorer > peek a message > Dead-letter),
+   or temporarily set `max-delivery-count` to `1` and send a message that will
+   fail. Confirm the manager's inbox receives the email and the message is
+   gone from the dead-letter queue afterward.
+
+## Troubleshooting (Part B)
+
+**ImageNotFoundFailure pulling from docker.io**: if logs show the container
+pulling `docker.io/library/petstoreorderitemsreserver:latest` instead of your
+ACR image, the `--image` wasn't fully qualified with the ACR login server:
+```powershell
+az functionapp config container set `
+  --name $FUNC_NAME --resource-group $RG `
+  --image "$ACR_LOGIN_SERVER/petstoreorderitemsreserver:latest" `
+  --registry-server "https://$ACR_LOGIN_SERVER" `
+  --registry-username $ACR_USERNAME `
+  --registry-password $ACR_PASSWORD
+
+az webapp restart --name $FUNC_NAME --resource-group $RG
+```
+
+**"0 functions found (Custom)" / no functions listed**: the Functions host is
+treating the app as a Custom Handler instead of Java. `FUNCTIONS_WORKER_RUNTIME`
+isn't baked into the image, so it must be set explicitly:
+```powershell
+az functionapp config appsettings set `
+  --name $FUNC_NAME --resource-group $RG `
+  --settings "FUNCTIONS_WORKER_RUNTIME=java"
+
+az webapp restart --name $FUNC_NAME --resource-group $RG
+```
+Re-check with `az functionapp function list --name $FUNC_NAME --resource-group $RG -o table` - you should see `reserveOrderItems`.
+
+**Container keeps restarting / "webjobs.storage" health check unhealthy**:
+usually CPU/memory starvation on a small plan (JVM cold start competes with
+the platform's health check pings), not a real storage connectivity issue
+(rule that out via Storage Account > Networking > Public network access).
+Scale up the plan:
+```powershell
+az appservice plan update --name $FUNC_PLAN_NAME --resource-group $RG --sku B2   # or B3 / Elastic Premium EP1
+az webapp restart --name $FUNC_NAME --resource-group $RG
+```
+
+## Redeploying after code changes (Part B)
+
+```powershell
+az acr build --registry $ACR_NAME --image "petstoreorderitemsreserver:v1.0.1" .
+az functionapp config container set `
+  --name $FUNC_NAME --resource-group $RG `
+  --image "$ACR_LOGIN_SERVER/petstoreorderitemsreserver:v1.0.1"
 ```

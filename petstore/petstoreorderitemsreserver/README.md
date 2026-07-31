@@ -20,7 +20,7 @@ Message body (JSON):
 
 The blob uploaded to storage is named `order-<sessionId>.json` and is overwritten on every message for the same session.
 
-If the Function throws (parse error, or all 3 blob upload retry attempts failing - see `BlobStorageService.uploadOrder`), the Service Bus message is left uncompleted and is redelivered. Once the queue's configured max delivery count is reached (`3`, see `infra/SERVICE_BUS_DEPLOYMENT.md`), Service Bus automatically dead-letters the message; a Logic App monitors the dead-letter queue and emails the manager (see `infra/LOGIC_APP_DEADLETTER_FALLBACK.md`).
+If the Function throws (parse error, or all 3 blob upload retry attempts failing - see `BlobStorageService.uploadOrder`), the Service Bus message is left uncompleted and is redelivered. Once the queue's configured max delivery count is reached (`3`), Service Bus automatically dead-letters the message; a Logic App monitors the dead-letter queue and emails the manager (see `../infra/DEPLOYMENT_STEPS.md`, Part B).
 
 ## Configuration
 

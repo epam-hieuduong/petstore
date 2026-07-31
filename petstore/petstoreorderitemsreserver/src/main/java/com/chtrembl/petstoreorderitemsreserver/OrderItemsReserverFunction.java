@@ -18,10 +18,10 @@ import java.util.logging.Logger;
  *
  * <p>Throwing from this method leaves the Service Bus message uncompleted,
  * so it becomes visible again and is redelivered. Once the queue's configured
- * max delivery count is reached (see infra/SERVICE_BUS_DEPLOYMENT.md, set to
- * 3), Service Bus automatically dead-letters the message, which the fallback
- * Logic App monitors to notify the manager (see
- * infra/LOGIC_APP_DEADLETTER_FALLBACK.md).</p>
+ * max delivery count is reached (set to 3, see infra/DEPLOYMENT_STEPS.md
+ * Part B), Service Bus automatically dead-letters the message, which the
+ * fallback Logic App monitors to notify the manager (see
+ * infra/DEPLOYMENT_STEPS.md, Part B, step B8).</p>
  */
 public class OrderItemsReserverFunction {
 
